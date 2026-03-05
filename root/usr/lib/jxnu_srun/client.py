@@ -6,14 +6,22 @@ import hmac
 import ipaddress
 import json
 import math
+import os
 import re
 import socket
 import subprocess
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone
+
+try:
+    import urllib.error as urllib_error
+    import urllib.request as urllib_request
+
+    HAVE_URLLIB = True
+except ModuleNotFoundError:
+    urllib_error = None
+    urllib_request = None
+    HAVE_URLLIB = False
 
 HEADER = {
     "User-Agent": (
@@ -42,6 +50,9 @@ DEFAULTS = {
 OPERATORS = {"cmcc", "ctcc", "cucc", "xn"}
 PAD_CHAR = "="
 ALPHA = "LVoJPiCN2R8G90yg+hmFHuacZ1OWMnrsSTXkYpUq/3dlbfKwv6xztjI7DeBE45QA"
+HTTP_EXCEPTIONS = (socket.timeout,)
+if HAVE_URLLIB:
+    HTTP_EXCEPTIONS = HTTP_EXCEPTIONS + (urllib_error.URLError,)
 
 
 def uci_get(option, default=""):
@@ -109,13 +120,64 @@ def in_quiet_window(cfg):
     return quiet_hours_enabled(cfg) and is_quiet_hours_now()
 
 
+def _url_encode_component(value):
+    safe = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+    out = []
+    for b in str(value).encode("utf-8"):
+        if b in safe:
+            out.append(chr(b))
+        elif b == 0x20:
+            out.append("+")
+        else:
+            out.append("%%%02X" % b)
+    return "".join(out)
+
+
+def _urlencode(params):
+    parts = []
+    for key, value in params.items():
+        parts.append(_url_encode_component(key) + "=" + _url_encode_component(value))
+    return "&".join(parts)
+
+
 def http_get(url, params=None, timeout=5):
     if params:
-        query = urllib.parse.urlencode(params)
+        query = _urlencode(params)
         url = url + ("&" if "?" in url else "?") + query
-    req = urllib.request.Request(url, headers=HEADER, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+
+    if HAVE_URLLIB:
+        req = urllib_request.Request(url, headers=HEADER, method="GET")
+        with urllib_request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    candidates = [
+        ("/bin/uclient-fetch", "uclient-fetch"),
+        ("/usr/bin/uclient-fetch", "uclient-fetch"),
+        ("/usr/bin/wget", "wget"),
+        ("/bin/wget", "wget"),
+    ]
+    selected = None
+    selected_type = ""
+    for path, kind in candidates:
+        if os.path.exists(path):
+            selected = path
+            selected_type = kind
+            break
+
+    if not selected:
+        raise RuntimeError("未找到可用 HTTP 客户端（uclient-fetch/wget）。")
+
+    if selected_type == "uclient-fetch":
+        cmd = [selected, "-q", "-O", "-", "--timeout", str(int(timeout)), url]
+    else:
+        cmd = [selected, "-q", "-O", "-", "--timeout=%d" % int(timeout), url]
+
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        return output.decode("utf-8", errors="replace")
+    except subprocess.CalledProcessError as exc:
+        details = exc.output.decode("utf-8", errors="replace") if exc.output else str(exc)
+        raise RuntimeError("HTTP 请求失败: " + details)
 
 
 def parse_jsonp(text):
@@ -504,7 +566,7 @@ def run_daemon():
                 else:
                     ok, message = run_quiet_logout(cfg)
                     quiet_logout_done = ok
-            except (urllib.error.URLError, socket.timeout) as exc:
+            except HTTP_EXCEPTIONS as exc:
                 ok, message = False, "网络错误: " + str(exc)
             except ValueError as exc:
                 ok, message = False, "响应解析错误: " + str(exc)
@@ -522,7 +584,7 @@ def run_daemon():
         if was_in_quiet:
             try:
                 _, message = run_once(cfg)
-            except (urllib.error.URLError, socket.timeout) as exc:
+            except HTTP_EXCEPTIONS as exc:
                 message = "网络错误: " + str(exc)
             except ValueError as exc:
                 message = "响应解析错误: " + str(exc)
@@ -538,7 +600,7 @@ def run_daemon():
 
         try:
             ok, message = run_once(cfg)
-        except (urllib.error.URLError, socket.timeout) as exc:
+        except HTTP_EXCEPTIONS as exc:
             ok, message = False, "网络错误: " + str(exc)
         except ValueError as exc:
             ok, message = False, "响应解析错误: " + str(exc)
@@ -573,7 +635,7 @@ def main():
 
         _, message = run_once(cfg)
         print(message)
-    except (urllib.error.URLError, socket.timeout) as exc:
+    except HTTP_EXCEPTIONS as exc:
         print("网络错误: " + str(exc))
     except ValueError as exc:
         print("响应解析错误: " + str(exc))
