@@ -616,12 +616,6 @@ def commit_reload_wireless():
     return False, "\uFF1B".join([x for x in [msg1, msg2] if x])
 
 
-def uci_quote_value(value):
-    text = str(value or "")
-    text = text.replace("\\", "\\\\").replace("'", "\\'")
-    return "'" + text + "'"
-
-
 def apply_sta_profile(section, profile):
     sec = str(section or "").strip()
     if not sec:
@@ -641,8 +635,8 @@ def apply_sta_profile(section, profile):
 
     for arg in [
         "wireless.%s.disabled=0" % sec,
-        "wireless.%s.ssid=%s" % (sec, uci_quote_value(ssid)),
-        "wireless.%s.encryption=%s" % (sec, uci_quote_value(encryption)),
+        "wireless.%s.ssid=%s" % (sec, ssid),
+        "wireless.%s.encryption=%s" % (sec, encryption),
     ]:
         c_ok, c_msg = run_cmd(["uci", "set", arg])
         ok = ok and c_ok
@@ -650,7 +644,7 @@ def apply_sta_profile(section, profile):
             msgs.append(c_msg)
 
     if wifi_key_required(encryption):
-        c_ok, c_msg = run_cmd(["uci", "set", "wireless.%s.key=%s" % (sec, uci_quote_value(key))])
+        c_ok, c_msg = run_cmd(["uci", "set", "wireless.%s.key=%s" % (sec, key)])
         ok = ok and c_ok
         if (not c_ok) and c_msg:
             msgs.append(c_msg)
