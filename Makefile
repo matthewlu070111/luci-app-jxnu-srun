@@ -12,7 +12,9 @@ LUCI_DEPENDS:=+python3
 LUCI_PKGARCH:=all
 
 define Package/$(PKG_NAME)/description
- LuCI app for JXNU SRun campus network auto login.
+ LuCI 应用：用于江西师范大学 SRun 校园网认证。
+ 支持自动登录、夜间时段热点切换、登录失败积分退避重试、
+ 手动输入热点 SSID 与手动测试切换。
 endef
 
 define Package/$(PKG_NAME)/postinst

@@ -616,6 +616,12 @@ def commit_reload_wireless():
     return False, "\uFF1B".join([x for x in [msg1, msg2] if x])
 
 
+def uci_quote_value(value):
+    text = str(value or "")
+    text = text.replace("\\", "\\\\").replace("'", "\\'")
+    return "'" + text + "'"
+
+
 def apply_sta_profile(section, profile):
     sec = str(section or "").strip()
     if not sec:
@@ -635,8 +641,8 @@ def apply_sta_profile(section, profile):
 
     for arg in [
         "wireless.%s.disabled=0" % sec,
-        "wireless.%s.ssid=%s" % (sec, ssid),
-        "wireless.%s.encryption=%s" % (sec, encryption),
+        "wireless.%s.ssid=%s" % (sec, uci_quote_value(ssid)),
+        "wireless.%s.encryption=%s" % (sec, uci_quote_value(encryption)),
     ]:
         c_ok, c_msg = run_cmd(["uci", "set", arg])
         ok = ok and c_ok
@@ -644,7 +650,7 @@ def apply_sta_profile(section, profile):
             msgs.append(c_msg)
 
     if wifi_key_required(encryption):
-        c_ok, c_msg = run_cmd(["uci", "set", "wireless.%s.key=%s" % (sec, key)])
+        c_ok, c_msg = run_cmd(["uci", "set", "wireless.%s.key=%s" % (sec, uci_quote_value(key))])
         ok = ok and c_ok
         if (not c_ok) and c_msg:
             msgs.append(c_msg)
@@ -1100,6 +1106,20 @@ def run_quiet_logout(cfg):
         return True, "夜间停用（未连接）"
     return False, "夜间停用下线失败: " + localize_error(message)
 
+
+def run_switch(cfg, expect_hotspot):
+    target = build_expected_profile(cfg, expect_hotspot)
+    if not target["ssid"]:
+        return False, "%s SSID 未配置。" % target["label"]
+    if wifi_key_required(target["encryption"]) and not target["key"]:
+        return False, "%s 配置缺少密码。" % target["label"]
+
+    switched, message = switch_sta_profile(cfg, expect_hotspot)
+    if switched:
+        return True, "切换成功: " + (message or "")
+    return False, "切换失败: " + (message or "未知错误")
+
+
 def run_daemon():
     last_message = ""
     was_in_quiet = False
@@ -1261,12 +1281,30 @@ def main():
     parser.add_argument("--daemon", action="store_true", help="run as daemon loop")
     parser.add_argument("--once", action="store_true", help="run login once")
     parser.add_argument("--status", action="store_true", help="query online status")
+    parser.add_argument("--switch-hotspot", action="store_true", help="switch STA profile to hotspot")
+    parser.add_argument("--switch-campus", action="store_true", help="switch STA profile to campus")
     args = parser.parse_args()
 
     cfg = load_config()
 
     if args.daemon:
         run_daemon()
+        return
+
+    if args.switch_hotspot and args.switch_campus:
+        print("参数错误：不能同时指定 --switch-hotspot 和 --switch-campus")
+        return
+
+    if args.switch_hotspot:
+        _, message = run_switch(cfg, expect_hotspot=True)
+        append_log("[JXNU-SRun] 手动切换热点结果: " + message)
+        print(message)
+        return
+
+    if args.switch_campus:
+        _, message = run_switch(cfg, expect_hotspot=False)
+        append_log("[JXNU-SRun] 手动切换校园网结果: " + message)
+        print(message)
         return
 
     exec_label = "手动登录结果" if args.once else "单次执行结果"
