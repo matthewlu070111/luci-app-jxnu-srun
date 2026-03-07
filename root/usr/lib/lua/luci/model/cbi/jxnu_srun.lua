@@ -106,6 +106,50 @@ local function list_sta_ssids()
     return ret
 end
 
+local function sorted_keys(set_map)
+    local ret = {}
+    for key, _ in pairs(set_map or {}) do
+        ret[#ret + 1] = key
+    end
+    table.sort(ret)
+    return ret
+end
+
+local function list_iwinfo_ifaces()
+    local ifaces = {}
+    local out = sys.exec("iwinfo 2>/dev/null") or ""
+    for line in out:gmatch("[^\n]+") do
+        local iface = line:match("^([%w%._%-]+)%s+ESSID:")
+        if iface and iface ~= "" then
+            ifaces[iface] = true
+        end
+    end
+    return sorted_keys(ifaces)
+end
+
+local function list_scanned_ssids()
+    if not has_cmd("iwinfo") then
+        return {}
+    end
+
+    local scanned = {}
+    local ifaces = list_iwinfo_ifaces()
+    for _, iface in ipairs(ifaces) do
+        local safe_iface = iface:match("^([%w%._%-]+)$")
+        if safe_iface then
+            local out = sys.exec("iwinfo " .. safe_iface .. " scan 2>/dev/null") or ""
+            for ssid in out:gmatch('ESSID:%s+"(.-)"') do
+                local name = util.trim(ssid or "")
+                if name ~= "" and name ~= "unknown" then
+                    scanned[name] = true
+                end
+            end
+        end
+    end
+
+    return sorted_keys(scanned)
+end
+
 local function list_has_value(list, value)
     for _, v in ipairs(list or {}) do
         if v == value then
@@ -214,7 +258,10 @@ failover_enabled = s:taboption("basic", Flag, "failover_enabled", "夜间模式�
 failover_enabled.rmempty = false
 failover_enabled.default = "1"
 
-local ssids = list_sta_ssids()
+local ssids = list_scanned_ssids()
+if #ssids == 0 then
+    ssids = list_sta_ssids()
+end
 local hotspot_ssids = {}
 for _, name in ipairs(ssids) do
     if name ~= CAMPUS_SSID then
@@ -232,7 +279,7 @@ if current_hotspot ~= "" and not list_has_value(hotspot_ssids, current_hotspot) 
     hotspot_ssid:value(current_hotspot, current_hotspot .. "（当前）")
 end
 if #hotspot_ssids == 0 and current_hotspot == "" then
-    hotspot_ssid:value("", "未找到可用 STA 热点SSID（已排除 jxnu_stu）")
+    hotspot_ssid:value("", "未扫描到热点SSID（请确认无线已启用）")
 end
 hotspot_ssid:depends("failover_enabled", "1")
 function hotspot_ssid.validate(self, value, section)
