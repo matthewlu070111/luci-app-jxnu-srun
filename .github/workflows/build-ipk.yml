@@ -29,6 +29,9 @@ jobs:
           - label: rockchip_armv8
             target: rockchip
             subtarget: armv8
+          - label: aarch64_generic
+            target: armsr
+            subtarget: armv8
           - label: x86_64
             target: x86
             subtarget: "64"
@@ -182,6 +185,7 @@ jobs:
 
             # 文件介绍：
             `rockchip_armv8` 为针对armv8小型设备构建的软件包；
+            `aarch64_generic` 为针对通用aarch64设备构建的软件包；
             `x86_64` 为针对一般x86电脑构建的软件包；
             其他框架请自行fork本项目，修改.github/workflow中build文件相关信息。
           prerelease: true
