@@ -199,10 +199,15 @@ end
 
 local quiet_desc = string.format("当前下线/上线时间：%s / %s", cfg.quiet_start or "00:00", cfg.quiet_end or "06:00")
 
-m = SimpleForm("jxnu_srun", "师大校园网", "江西师范大学校园网认证配置（JSON后端）")
-m.reset = false
-
-s = m:section(SimpleSection, nil, nil)
+m = Map("jxnu_srun", "师大校园网", "江西师范大学校园网认证配置（JSON后端）")
+if not m.uci:get("jxnu_srun", "main") then
+    m.uci:section("jxnu_srun", "main", "main")
+    m.uci:save("jxnu_srun")
+    m.uci:commit("jxnu_srun")
+end
+s = m:section(NamedSection, "main", "main", "配置")
+s.addremove = false
+s.anonymous = true
 s:tab("basic", "基础设置")
 s:tab("advanced", "进阶设置")
 if cfg.developer_mode == "1" then
@@ -503,7 +508,7 @@ end
 
 function m.parse(self, ...)
     changed = false
-    SimpleForm.parse(self, ...)
+    Map.parse(self, ...)
     if changed then
         save_cfg(cfg)
         m.message = (m.message and (m.message .. "；") or "") .. "配置已保存到 JSON"
