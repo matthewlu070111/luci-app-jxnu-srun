@@ -26,6 +26,9 @@ jobs:
     steps:
       - name: Checkout plugin repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -142,6 +145,9 @@ jobs:
     steps:
       - name: Checkout plugin repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Validate release version
         run: |
