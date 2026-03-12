@@ -9,6 +9,7 @@
   "backoff_max_retries": "0",
   "backoff_initial_duration": "10",
   "backoff_max_duration": "600",
+  "manual_terminal_check_max_attempts": "5",
   "backoff_exponent_factor": "1.5",
   "backoff_inter_const_factor": "0",
   "backoff_outer_const_factor": "0",

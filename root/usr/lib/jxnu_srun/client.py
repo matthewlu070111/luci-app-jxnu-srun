@@ -1977,6 +1977,9 @@ def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
     attempts = max(int(attempts), 1)
     last_message = ""
     for idx in range(attempts):
+        append_log(
+            "[JXNU-SRun] 正在执行手动登录终态校验：第%d次检查连通性。" % (idx + 1)
+        )
         snapshot = build_runtime_snapshot(cfg)
         ssid_ok = snapshot.get("current_ssid") == cfg.get("campus_ssid")
         bssid_expect = str(cfg.get("campus_bssid", "")).strip().lower()
@@ -1992,6 +1995,40 @@ def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
         if idx + 1 < attempts:
             time.sleep(max(int(delay_seconds), 1))
     return False, last_message
+
+
+def wait_for_manual_logout_ready(
+    rad_user_info_api, cfg, bind_ip=None, attempts=5, delay_seconds=2
+):
+    attempts = max(int(attempts), 1)
+    last_message = ""
+    for idx in range(attempts):
+        append_log(
+            "[JXNU-SRun] 正在执行手动登出终态校验：第%d次检查连通性。" % (idx + 1)
+        )
+        online, offline_msg = query_online_status(
+            rad_user_info_api, cfg["username"], bind_ip=bind_ip
+        )
+        if not online:
+            internet_ok, internet_msg = test_internet_connectivity(timeout=2)
+            if not internet_ok:
+                return True, "已确认离线，互联网连通性检查结果=不可达"
+            last_message = "离线后互联网仍可达（%s）" % (internet_msg or "可达")
+        else:
+            last_message = localize_error(offline_msg)
+
+        if idx + 1 < attempts:
+            time.sleep(max(int(delay_seconds), 1))
+
+    return False, last_message or "终态校验超时"
+
+
+def get_manual_terminal_check_attempts(cfg):
+    try:
+        attempts = int(str(cfg.get("manual_terminal_check_max_attempts", "5")).strip())
+        return attempts if attempts > 0 else 5
+    except Exception:
+        return 5
 
 
 def clean_slate_for_manual_login(cfg, online_user=""):
@@ -2269,28 +2306,21 @@ def run_manual_logout(cfg, override_user_id=None):
                 "[JXNU-SRun] 手动登出请求已受理：接口返回结果=%s，开始校验离线状态。"
                 % message
             )
-            offline, offline_msg = wait_for_logout_status(
-                urls["rad_user_info_api"], logout_cfg, bind_ip=bip
+            max_attempts = get_manual_terminal_check_attempts(cfg)
+            ready_ok, ready_msg = wait_for_manual_logout_ready(
+                urls["rad_user_info_api"],
+                logout_cfg,
+                bind_ip=bip,
+                attempts=max_attempts,
             )
-            if offline:
-                internet_ok, internet_msg = test_internet_connectivity(timeout=2)
-                if internet_ok:
-                    append_log(
-                        "[JXNU-SRun] 手动登出校验失败：离线状态检查通过，但互联网连通性检查结果=可达，返回结果=%s。"
-                        % (internet_msg or "可达")
-                    )
-                    return False, "登出失败：离线后互联网仍可达"
-                append_log(
-                    "[JXNU-SRun] 手动登出成功：已确认离线，互联网连通性检查结果=不可达。"
-                )
+            if ready_ok:
+                append_log("[JXNU-SRun] 手动登出成功：%s。" % ready_msg)
                 return True, "登出成功"
             append_log(
-                "[JXNU-SRun] 手动登出校验失败：注销请求已发送，但在线状态检查结果=%s。"
-                % localize_error(offline_msg)
+                "[JXNU-SRun] 手动登出校验失败：达到最大检查次数 %d 次，返回结果=%s。"
+                % (max_attempts, ready_msg)
             )
-            return False, "登出请求已发送，但当前仍在线（%s）" % localize_error(
-                offline_msg
-            )
+            return False, "登出失败：%s" % ready_msg
 
         localized = localize_error(message)
         append_log("[JXNU-SRun] 手动登出失败：注销接口返回结果=%s。" % localized)
@@ -2333,11 +2363,15 @@ def run_manual_login(cfg):
             "[JXNU-SRun] 手动登录请求已成功：登录阶段返回结果=%s，开始校验目标无线配置与互联网连通性。"
             % login_msg
         )
-        ready_ok, ready_msg = wait_for_manual_login_ready(cfg)
+        max_attempts = get_manual_terminal_check_attempts(cfg)
+        ready_ok, ready_msg = wait_for_manual_login_ready(cfg, attempts=max_attempts)
         if ready_ok:
             append_log("[JXNU-SRun] 手动登录成功：%s。" % ready_msg)
             return True, "登录成功"
-        append_log("[JXNU-SRun] 手动登录校验失败：%s。" % ready_msg)
+        append_log(
+            "[JXNU-SRun] 手动登录校验失败：达到最大检查次数 %d 次，返回结果=%s。"
+            % (max_attempts, ready_msg)
+        )
         return False, "登录后校验失败：%s" % ready_msg
     append_log("[JXNU-SRun] 手动登录失败：登录阶段返回结果=%s。" % login_msg)
     return False, login_msg

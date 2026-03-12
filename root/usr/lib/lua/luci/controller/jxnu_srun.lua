@@ -85,6 +85,7 @@ for _, k in ipairs({
     "enabled", "quiet_hours_enabled", "quiet_start", "quiet_end",
     "force_logout_in_quiet", "failover_enabled", "backoff_enable",
     "backoff_max_retries", "backoff_initial_duration", "backoff_max_duration",
+    "manual_terminal_check_max_attempts",
     "backoff_exponent_factor", "backoff_inter_const_factor",
     "backoff_outer_const_factor", "interval", "developer_mode",
     "sta_iface", "n", "type", "enc",

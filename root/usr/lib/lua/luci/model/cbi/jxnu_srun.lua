@@ -28,6 +28,7 @@ local SCALAR_DEFAULTS = {
     force_logout_in_quiet = "1", failover_enabled = "1",
     backoff_enable = "1", backoff_max_retries = "0",
     backoff_initial_duration = "10", backoff_max_duration = "600",
+    manual_terminal_check_max_attempts = "5",
     backoff_exponent_factor = "1.5", backoff_inter_const_factor = "0",
     backoff_outer_const_factor = "0", interval = "180",
     developer_mode = "0", sta_iface = "",
@@ -544,7 +545,37 @@ enabled = s:taboption("basic", Flag, "enabled", "启用")
 enabled.description = "仅控制后台自动登录守护服务（自动检测、自动重连、按时段自动上下线/切网）。手动登录和手动登出始终可用，不受此开关影响。"
 bind_flag(enabled, "enabled")
 
-failover_enabled = s:taboption("basic", Flag, "failover_enabled", "夜间模式自动切换热点SSID")
+quiet_desc = "当前下线/上线时间：" .. tostring(cfg.quiet_start or "00:00") .. " / " .. tostring(cfg.quiet_end or "06:00")
+
+quiet_hours_enabled = s:taboption("basic", Flag, "quiet_hours_enabled", "按时段自动上/下线", quiet_desc)
+bind_flag(quiet_hours_enabled, "quiet_hours_enabled")
+
+quiet_start = s:taboption("basic", Value, "quiet_start", "下线时间（北京时间 HH:MM）")
+quiet_start.default = "00:00"
+function quiet_start.validate(self, value)
+    local t = validate_hhmm(value)
+    if t then
+        return t
+    end
+    return nil, "时间格式应为 HH:MM（24小时制）"
+end
+bind_text(quiet_start, "quiet_start", validate_hhmm)
+
+quiet_end = s:taboption("basic", Value, "quiet_end", "上线时间（北京时间 HH:MM）")
+quiet_end.default = "06:00"
+function quiet_end.validate(self, value)
+    local t = validate_hhmm(value)
+    if t then
+        return t
+    end
+    return nil, "时间格式应为 HH:MM（24小时制）"
+end
+bind_text(quiet_end, "quiet_end", validate_hhmm)
+
+force_logout_in_quiet = s:taboption("basic", Flag, "force_logout_in_quiet", "进入下线时段时强制下线")
+bind_flag(force_logout_in_quiet, "force_logout_in_quiet")
+
+failover_enabled = s:taboption("basic", Flag, "failover_enabled", "登出时自动切换热点上网")
 bind_flag(failover_enabled, "failover_enabled")
 
 -- 校园网账号表格 + 热点配置表格 + 弹窗
@@ -829,34 +860,6 @@ window.jxnuModalSave = function() {
 ]]
 end
 
-quiet_hours_enabled = s:taboption("advanced", Flag, "quiet_hours_enabled", "按时段自动上/下线", quiet_desc)
-bind_flag(quiet_hours_enabled, "quiet_hours_enabled")
-
-quiet_start = s:taboption("advanced", Value, "quiet_start", "下线时间（北京时间 HH:MM）")
-quiet_start.default = "00:00"
-function quiet_start.validate(self, value)
-    local t = validate_hhmm(value)
-    if t then
-        return t
-    end
-    return nil, "时间格式应为 HH:MM（24小时制）"
-end
-bind_text(quiet_start, "quiet_start", validate_hhmm)
-
-quiet_end = s:taboption("advanced", Value, "quiet_end", "上线时间（北京时间 HH:MM）")
-quiet_end.default = "06:00"
-function quiet_end.validate(self, value)
-    local t = validate_hhmm(value)
-    if t then
-        return t
-    end
-    return nil, "时间格式应为 HH:MM（24小时制）"
-end
-bind_text(quiet_end, "quiet_end", validate_hhmm)
-
-force_logout_in_quiet = s:taboption("advanced", Flag, "force_logout_in_quiet", "进入下线时段时强制下线")
-bind_flag(force_logout_in_quiet, "force_logout_in_quiet")
-
 developer_mode = s:taboption("advanced", Flag, "developer_mode", "开发者选项")
 bind_flag(developer_mode, "developer_mode")
 
@@ -884,6 +887,16 @@ function backoff_max_duration.validate(self, value)
     return nil, "最大等待时长必须是大于等于 0 的数字"
 end
 bind_text(backoff_max_duration, "backoff_max_duration", validate_non_negative_number)
+
+manual_terminal_check_max_attempts = s:taboption("advanced", Value, "manual_terminal_check_max_attempts", "手动登录/登出终态最大检查次数")
+function manual_terminal_check_max_attempts.validate(self, value)
+    if validate_non_negative_number(value) then
+        return value
+    end
+    return nil, "手动终态检查次数必须是大于等于 0 的数字"
+end
+manual_terminal_check_max_attempts.placeholder = "5"
+bind_text(manual_terminal_check_max_attempts, "manual_terminal_check_max_attempts", validate_non_negative_number)
 
 backoff_exponent_factor = s:taboption("advanced", Value, "backoff_exponent_factor", "指数因子")
 function backoff_exponent_factor.validate(self, value)
