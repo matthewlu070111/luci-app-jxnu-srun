@@ -366,19 +366,29 @@ def save_runtime_status(message, state=None, **extra):
 
 def build_runtime_snapshot(cfg, state=None):
     data = parse_wireless_iface_data()
-    section = get_active_sta_section(cfg, data)
+    section = get_runtime_sta_section(cfg, data)
     profile = get_sta_profile_from_section(section, data) if section else {}
     ssid = str(profile.get("ssid", "")).strip()
     bssid = str(profile.get("bssid", "")).strip().lower()
     net = get_network_interface_from_sta_section(section, data) if section else None
     ip = get_ipv4_from_network_interface(net) if net else None
     previous = load_runtime_state()
+    wired_mode = campus_uses_wired(cfg)
+    wan_ip = get_ipv4_from_network_interface("wan") if wired_mode else None
     if ssid == str(cfg.get("hotspot_ssid", "")).strip() and ssid:
         mode = "hotspot"
+    elif wired_mode and wan_ip:
+        mode = "campus"
     elif ssid == str(cfg.get("campus_ssid", "")).strip() and ssid:
         mode = "campus"
     else:
         mode = "unknown"
+
+    if mode == "campus" and wired_mode and wan_ip:
+        ssid = "有线接入"
+        bssid = ""
+        net = "wan"
+        ip = wan_ip
 
     connectivity = "未连接"
     connectivity_level = "offline"
@@ -416,22 +426,27 @@ def build_runtime_snapshot(cfg, state=None):
     else:
         previous["connectivity_checked_at"] = int(time.time())
 
-    try:
-        urls = build_urls(cfg["base_url"])
-        online_now, online_user, _ = query_online_identity(
-            urls["rad_user_info_api"], cfg["username"]
-        )
-        if online_now and online_user:
-            online_account_label = online_user
-    except Exception:
-        online_account_label = ""
+    if mode != "hotspot" and cfg.get("username"):
+        try:
+            urls = build_urls(cfg["base_url"])
+            online_now, online_user, _ = query_online_identity(
+                urls["rad_user_info_api"], cfg["username"]
+            )
+            if online_now and online_user:
+                online_account_label = online_user
+        except Exception:
+            online_account_label = ""
 
     if mode == "campus":
-        mode_label = "校园网模式"
+        mode_label = "校园网模式（有线）" if wired_mode else "校园网模式"
     elif mode == "hotspot":
         mode_label = "热点模式"
     else:
         mode_label = "未知模式"
+
+    current_campus_access_mode = ""
+    if mode == "campus":
+        current_campus_access_mode = "wired" if wired_mode and net == "wan" else "wifi"
 
     return {
         "current_mode": mode,
@@ -445,6 +460,8 @@ def build_runtime_snapshot(cfg, state=None):
         "connectivity_level": connectivity_level,
         "connectivity_checked_at": int(previous.get("connectivity_checked_at", 0) or 0),
         "campus_account_label": str(cfg.get("campus_account_label", "")),
+        "campus_access_mode": str(cfg.get("campus_access_mode", "wifi")),
+        "current_campus_access_mode": current_campus_access_mode,
         "online_account_label": online_account_label,
         "hotspot_profile_label": str(cfg.get("hotspot_profile_label", "")),
         "campus_ssid": str(cfg.get("campus_ssid", "")),
@@ -527,6 +544,19 @@ def _make_hotspot_label(profile):
     return str(profile.get("ssid", "")).strip() or "未命名热点"
 
 
+def normalize_campus_access_mode(value):
+    mode = str(value or "wifi").strip().lower()
+    if mode not in ("wifi", "wired"):
+        mode = "wifi"
+    return mode
+
+
+def campus_uses_wired(cfg):
+    return (
+        normalize_campus_access_mode((cfg or {}).get("campus_access_mode")) == "wired"
+    )
+
+
 def _migrate_legacy_config(raw):
     """将旧版扁平配置迁移为新版嵌套结构（内存中）"""
     migrated = {}
@@ -542,6 +572,7 @@ def _migrate_legacy_config(raw):
     campus_account = {
         "id": "campus-1",
         "label": "",
+        "access_mode": "wifi",
         "base_url": str(raw.get("base_url", "http://172.17.1.2")).strip(),
         "ac_id": str(raw.get("ac_id", "1")).strip(),
         "user_id": user_id,
@@ -637,6 +668,9 @@ def resolve_active_items(cfg):
     cfg["password"] = str(campus.get("password", "")).strip()
     cfg["base_url"] = (
         str(campus.get("base_url", "http://172.17.1.2")).strip().rstrip("/")
+    )
+    cfg["campus_access_mode"] = normalize_campus_access_mode(
+        campus.get("access_mode", "wifi")
     )
     cfg["ac_id"] = str(campus.get("ac_id", "1")).strip()
     cfg["campus_ssid"] = str(campus.get("ssid", "jxnu_stu")).strip()
@@ -855,6 +889,8 @@ def connectivity_mode_matches(snapshot, cfg, require_ssid=False):
     mode = str(cfg.get("connectivity_check_mode", "internet")).strip().lower()
     current_ssid = str(snapshot.get("current_ssid", "")).strip()
     target_ssid = str(cfg.get("campus_ssid", "")).strip()
+    if campus_uses_wired(cfg):
+        require_ssid = False
     ssid_ok = (not require_ssid) or (current_ssid and current_ssid == target_ssid)
     if not ssid_ok:
         return False
@@ -1303,15 +1339,48 @@ def get_active_sta_section(cfg=None, wireless_data=None):
     return get_sta_section(cfg, data)
 
 
+def get_runtime_sta_section(cfg=None, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    active = get_active_sta_section(cfg, data)
+    if active:
+        return active
+
+    known_ssids = []
+    hotspot_ssid = str((cfg or {}).get("hotspot_ssid", "")).strip()
+    campus_ssid = str((cfg or {}).get("campus_ssid", "")).strip()
+    if hotspot_ssid:
+        known_ssids.append(hotspot_ssid)
+    if campus_ssid:
+        known_ssids.append(campus_ssid)
+
+    for sec in get_enabled_sta_sections(data):
+        profile = get_sta_profile_from_section(sec, data)
+        if str(profile.get("ssid", "")).strip() in known_ssids:
+            return sec
+
+    for sec in get_sta_sections(data):
+        profile = get_sta_profile_from_section(sec, data)
+        if str(profile.get("ssid", "")).strip() in known_ssids:
+            return sec
+
+    enabled = get_enabled_sta_sections(data)
+    if enabled:
+        return enabled[0]
+    sections = get_sta_sections(data)
+    return sections[0] if sections else None
+
+
 def detect_runtime_mode(cfg, wireless_data=None):
     data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
-    section = get_active_sta_section(cfg, data)
-    if not section:
-        return "unknown"
-    profile = get_sta_profile_from_section(section, data)
+    section = get_runtime_sta_section(cfg, data)
+    profile = get_sta_profile_from_section(section, data) if section else {}
     ssid = str(profile.get("ssid", "")).strip()
     if ssid and ssid == str(cfg.get("hotspot_ssid", "")).strip():
         return "hotspot"
+    if campus_uses_wired(cfg) and get_ipv4_from_network_interface("wan"):
+        return "campus"
+    if not section:
+        return "unknown"
     if ssid and ssid == str(cfg.get("campus_ssid", "")).strip():
         return "campus"
     return "unknown"
@@ -1358,6 +1427,31 @@ def parse_radio_bands():
             else:
                 bands[radio] = "2g"
     return bands
+
+
+def get_available_wifi_radios(wireless_data=None):
+    radios = []
+    bands = parse_radio_bands()
+    for radio in sorted(bands.keys(), reverse=True):
+        radios.append(radio)
+
+    if radios:
+        return radios
+
+    ok, out = run_cmd(["uci", "show", "wireless"])
+    if not ok or not out:
+        return []
+
+    seen = set()
+    for line in out.splitlines():
+        match = re.match(r"^wireless\.(radio\d+)\.=wifi-device$", line.strip())
+        if not match:
+            continue
+        radio = match.group(1)
+        if radio not in seen:
+            radios.append(radio)
+            seen.add(radio)
+    return radios
 
 
 def band_label(band):
@@ -1536,6 +1630,102 @@ def create_sta_on_radio(radio, network_name, profile):
     return section, ""
 
 
+def ensure_network_interface(name="wwan"):
+    iface = str(name or "wwan").strip() or "wwan"
+    ok, out = run_cmd(["uci", "-q", "get", "network.%s" % iface])
+    if ok and out:
+        proto_ok, proto_out = run_cmd(["uci", "-q", "get", "network.%s.proto" % iface])
+        if proto_ok and str(proto_out or "").strip():
+            return True, iface, ""
+
+    msgs = []
+    for cmd in [
+        ["uci", "set", "network.%s=interface" % iface],
+        ["uci", "set", "network.%s.proto=dhcp" % iface],
+    ]:
+        c_ok, c_msg = run_cmd(cmd)
+        if (not c_ok) and c_msg:
+            msgs.append(c_msg)
+
+    commit_ok, commit_msg = run_cmd(["uci", "commit", "network"])
+    if (not commit_ok) and commit_msg:
+        msgs.append(commit_msg)
+
+    reload_ok, reload_msg = run_cmd(["/etc/init.d/network", "reload"])
+    if (not reload_ok) and reload_msg:
+        msgs.append(reload_msg)
+
+    if msgs:
+        return False, iface, "；".join(msgs)
+    return True, iface, "已自动创建网络接口 %s" % iface
+
+
+def choose_fallback_radio(cfg, expect_hotspot, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+
+    explicit = str(
+        (cfg or {}).get("hotspot_radio" if expect_hotspot else "campus_radio", "")
+    ).strip()
+    if explicit:
+        return explicit
+
+    active = get_active_sta_section(cfg, data)
+    active_radio = get_radio_for_section(active, data) if active else ""
+    if active_radio:
+        return active_radio
+
+    target = build_expected_profile(cfg, expect_hotspot)
+    existing = _find_sta_by_profile(target, data)
+    existing_radio = get_radio_for_section(existing, data) if existing else ""
+    if existing_radio:
+        return existing_radio
+
+    available = get_available_wifi_radios(data)
+    if not available:
+        return ""
+    if "radio1" in available:
+        return "radio1"
+    if "radio0" in available:
+        return "radio0"
+    return available[0]
+
+
+def ensure_runtime_wireless_prerequisites(cfg, expect_hotspot, wireless_data=None):
+    if (not expect_hotspot) and campus_uses_wired(cfg):
+        data = (
+            wireless_data if wireless_data is not None else parse_wireless_iface_data()
+        )
+        wan_ip = get_ipv4_from_network_interface("wan")
+        if wan_ip:
+            return True, "检测到有线校园网入口（wan=%s）" % wan_ip, data
+        return (
+            False,
+            "当前校园网账号已设为有线接入模式，但 WAN 口还没有可用 IPv4。",
+            data,
+        )
+
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    radios = get_available_wifi_radios(data)
+    if not radios:
+        return False, "当前路由器未发现可用无线射频，请先确认无线功能已启用。", data
+
+    target = build_expected_profile(cfg, expect_hotspot)
+    if not target.get("ssid"):
+        return False, "%s SSID 未配置。" % target["label"], data
+    if wifi_key_required(target.get("encryption", "none")) and not target.get("key"):
+        return False, "%s 需要密码，但当前配置为空。" % target["label"], data
+
+    ok, _, message = ensure_network_interface("wwan")
+    data = parse_wireless_iface_data()
+    if not ok:
+        return (
+            False,
+            "已尝试自动创建网络接口 wwan，但失败：%s" % (message or "未知错误"),
+            data,
+        )
+    return True, message, data
+
+
 def activate_sta_section(cfg, enable_sec, wireless_data=None):
     sec = str(enable_sec or "").strip()
     if not sec:
@@ -1634,6 +1824,9 @@ def apply_sta_profile(cfg, section, profile, wireless_data=None):
 def build_expected_profile(cfg, expect_hotspot):
     prefix = "hotspot" if expect_hotspot else "campus"
     return {
+        "access_mode": "wifi"
+        if expect_hotspot
+        else normalize_campus_access_mode(cfg.get("campus_access_mode", "wifi")),
         "ssid": str(cfg.get(prefix + "_ssid", "")).strip(),
         "bssid": str(cfg.get(prefix + "_bssid", "")).strip().lower(),
         "encryption": normalize_wifi_encryption(
@@ -1701,7 +1894,7 @@ def get_preferred_profile_radio(cfg, expect_hotspot, wireless_data=None):
     key = "hotspot_radio" if expect_hotspot else "campus_radio"
     radio = str((cfg or {}).get(key, "")).strip()
     if not radio:
-        return ""
+        return choose_fallback_radio(cfg, expect_hotspot, wireless_data)
 
     data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
     bands = parse_radio_bands()
@@ -1713,7 +1906,9 @@ def get_preferred_profile_radio(cfg, expect_hotspot, wireless_data=None):
         device = str(opts.get("device", "")).strip()
         if device:
             devices.add(device)
-    return radio if radio in devices else ""
+    if radio in devices:
+        return radio
+    return choose_fallback_radio(cfg, expect_hotspot, wireless_data)
 
 
 def get_preferred_hotspot_radio(cfg, wireless_data=None):
@@ -1724,7 +1919,7 @@ def select_sta_section(cfg, expect_hotspot, base_section, target, wireless_data)
     existing = _find_sta_by_profile(target, wireless_data)
     preferred_radio = get_preferred_profile_radio(cfg, expect_hotspot, wireless_data)
     if not preferred_radio:
-        return existing or base_section, ""
+        return existing or base_section, "未找到合适的无线频段，已尝试自动选择但失败。"
 
     if existing and get_radio_for_section(existing, wireless_data) == preferred_radio:
         return existing, ""
@@ -1738,13 +1933,25 @@ def select_sta_section(cfg, expect_hotspot, base_section, target, wireless_data)
     )
     created, create_msg = create_sta_on_radio(preferred_radio, network_name, target)
     if not created:
-        return None, create_msg or ("无法在 %s 上创建 STA 接口节" % preferred_radio)
+        return (
+            None,
+            create_msg
+            or (
+                "当前没有可用的无线接口，且未能在 %s 上自动创建 STA 接口节"
+                % preferred_radio
+            ),
+        )
     return created, create_msg
 
 
 def switch_sta_profile(cfg, expect_hotspot):
     cfg, _, _ = apply_default_selection_for_runtime(expect_hotspot, "执行无线切换前")
     data = parse_wireless_iface_data()
+    ready_ok, ready_msg, data = ensure_runtime_wireless_prerequisites(
+        cfg, expect_hotspot, data
+    )
+    if not ready_ok:
+        return False, ready_msg
     named_ok, named_result = ensure_named_managed_sta_sections(cfg, data)
     if not named_ok:
         return False, named_result or "整理无线接口节名称失败。"
@@ -1752,18 +1959,17 @@ def switch_sta_profile(cfg, expect_hotspot):
         data = parse_wireless_iface_data()
 
     base_section = get_sta_section(cfg, data)
-    if not base_section:
-        return False, "未找到可用的 STA 接口节。"
-
     target = build_expected_profile(cfg, expect_hotspot)
-    if not target["ssid"]:
-        return False, "%s SSID 未配置。" % target["label"]
 
     section, select_msg = select_sta_section(
         cfg, expect_hotspot, base_section, target, data
     )
     if not section:
-        return False, select_msg or "未找到可用的 STA 接口节。"
+        return (
+            False,
+            select_msg
+            or "当前路由器还没有可用于连接目标网络的无线接口，且自动创建失败。",
+        )
 
     data_after_select = parse_wireless_iface_data()
     ok, msg = apply_sta_profile(cfg, section, target, data_after_select)
@@ -1869,6 +2075,12 @@ def switch_to_hotspot(cfg):
 
 
 def switch_to_campus(cfg):
+    if campus_uses_wired(cfg):
+        disable_managed_sta_sections(cfg, parse_wireless_iface_data())
+        wan_ip = get_ipv4_from_network_interface("wan")
+        if wan_ip:
+            return True, "已切换为有线校园网模式（wan, %s）" % wan_ip
+        return False, "已切到有线校园网模式，但 WAN 口暂未获取到 IPv4 地址"
     return switch_sta_profile(cfg, expect_hotspot=False)
 
 
@@ -1926,6 +2138,12 @@ def _test_portal_reachability(cfg, timeout=3):
 def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
     if not failover_enabled(cfg):
         return True, "", last_switch_ts
+
+    if (not expect_hotspot) and campus_uses_wired(cfg):
+        wan_ip = get_ipv4_from_network_interface("wan")
+        if wan_ip:
+            return True, "", last_switch_ts
+        return False, "有线校园网未就绪，WAN 口尚未获取到 IPv4。", last_switch_ts
 
     data = parse_wireless_iface_data()
     section = get_sta_section(cfg, data)
@@ -2191,19 +2409,22 @@ def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
     attempts = max(int(attempts), 1)
     last_message = ""
     ready_label = get_manual_terminal_check_label(cfg)
+    wired_mode = campus_uses_wired(cfg)
     for idx in range(attempts):
         append_log(
             "[JXNU-SRun] 正在执行手动登录终态校验：第%d次检查连通性。" % (idx + 1)
         )
         snapshot = build_runtime_snapshot(cfg)
-        ssid_ok = snapshot.get("current_ssid") == cfg.get("campus_ssid")
+        ssid_ok = wired_mode or snapshot.get("current_ssid") == cfg.get("campus_ssid")
         bssid_expect = str(cfg.get("campus_bssid", "")).strip().lower()
         current_bssid = str(snapshot.get("current_bssid", "")).strip().lower()
-        bssid_ok = (
+        bssid_ok = wired_mode or (
             (not bssid_expect) or (not current_bssid) or current_bssid == bssid_expect
         )
         online_ok = connectivity_mode_matches(snapshot, cfg, require_ssid=True)
         if ssid_ok and bssid_ok and online_ok:
+            if wired_mode:
+                return True, "已切到有线校园网并确认%s" % ready_label
             return True, "已关联目标校园网并确认%s" % ready_label
         if ssid_ok and online_ok and bssid_expect and not current_bssid:
             return (
@@ -2265,6 +2486,29 @@ def get_manual_terminal_check_label(cfg):
 
 
 def clean_slate_for_manual_login(cfg, online_user=""):
+    if campus_uses_wired(cfg):
+        if online_user:
+            append_log(
+                "[JXNU-SRun] 正在执行手动登录预清理：检测到已有在线账号 %s，开始注销。"
+                % online_user
+            )
+            ok, message = run_manual_logout(cfg, override_user_id=online_user)
+            if not ok:
+                append_log(
+                    "[JXNU-SRun] 手动登录预清理失败：注销在线账号失败，返回结果：%s"
+                    % message
+                )
+                return False, message
+            append_log("[JXNU-SRun] 手动登录预清理成功：历史在线账号已注销。")
+
+        append_log(
+            "[JXNU-SRun] 当前校园网账号使用有线接入模式：跳过无线重建，直接使用 WAN 口继续登录。"
+        )
+        wan_ip = get_ipv4_from_network_interface("wan")
+        if not wan_ip:
+            return False, "有线校园网模式下，WAN 口尚未获取到 IPv4 地址"
+        return True, ""
+
     active_data = parse_wireless_iface_data()
     active_section = get_active_sta_section(cfg, active_data)
     active_profile = (
@@ -2943,6 +3187,10 @@ def run_daemon():
         state,
         daemon_running=True,
         enabled=True,
+        last_action="",
+        last_action_ts=0,
+        action_result="",
+        action_started_at=0,
         pending_action="",
         **build_runtime_snapshot(load_config(), state),
     )

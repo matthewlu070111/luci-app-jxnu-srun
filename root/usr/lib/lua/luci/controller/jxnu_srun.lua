@@ -94,6 +94,24 @@ local function handle_force_stop()
     return true, string.format("已强制停止插件进程（结束 %d 个进程）", #killed)
 end
 
+local function current_pending_runtime_action()
+    local action = read_json_file(ACTION_FILE)
+    local queued = tostring(action.action or "")
+    if queued ~= "" then
+        return queued
+    end
+
+    local state = read_json_file(STATE_FILE)
+    if tostring(state.action_result or "") == "pending" then
+        local daemon_running = state.daemon_running and true or false
+        local started_at = tonumber(state.action_started_at) or tonumber(state.last_action_ts) or 0
+        if daemon_running or (started_at > 0 and (os.time() - started_at) < 15) then
+            return tostring(state.pending_action or state.last_action or "")
+        end
+    end
+    return ""
+end
+
 function action_status()
     local data = read_json_file(STATE_FILE)
     local action = read_json_file(ACTION_FILE)
@@ -215,8 +233,8 @@ function action_enqueue()
 
     -- 原有的 daemon action 处理
     local daemon_actions = {
-        switch_hotspot = "已提交切到热点请求",
-        switch_campus = "已提交切回校园网请求",
+        switch_hotspot = "已提交切到热点请求，并已停用自动守护服务",
+        switch_campus = "已提交切回校园网请求，并已停用自动守护服务",
         manual_login = "已提交手动登录请求",
         manual_logout = "已提交手动登出请求",
     }
@@ -228,12 +246,40 @@ function action_enqueue()
     end
 
     if daemon_actions[action] then
+        local pending = current_pending_runtime_action()
+        if pending ~= "" then
+            http.prepare_content("application/json")
+            http.write(jsonc.stringify({
+                ok = false,
+                message = "已有动作正在执行: " .. pending .. "，请等待完成后再试",
+                action = action,
+                pending_action = pending,
+                ts = os.time(),
+            }))
+            return
+        end
+
         local requested_at = os.time()
+        local state = read_json_file(STATE_FILE)
+        if action == "switch_hotspot" or action == "switch_campus" then
+            local cfg = load_config_json()
+            cfg.enabled = "0"
+            save_config_json(cfg)
+            state.enabled = false
+        end
         write_json_file(ACTION_FILE, {
             action = action,
             requested_at = requested_at,
         })
-        sys.call("(sleep 1; /etc/init.d/jxnu_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
+        state.message = daemon_actions[action]
+        state.pending_action = action
+        state.last_action = action
+        state.last_action_ts = requested_at
+        state.action_result = "pending"
+        state.action_started_at = requested_at
+        state.updated_at = requested_at
+        write_json_file(STATE_FILE, state)
+        sys.call("(/etc/init.d/jxnu_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
         http.prepare_content("application/json")
         http.write(jsonc.stringify({ ok = true, message = daemon_actions[action], requested_at = requested_at }))
         return
@@ -252,9 +298,18 @@ function action_enqueue()
         local item = {
             label = fv("label"), user_id = fv("user_id"),
             operator = fv("operator"), password = fv("password"),
+            access_mode = fv("access_mode"),
             base_url = fv("base_url"), ac_id = fv("ac_id"),
             ssid = fv("ssid"), bssid = fv("bssid"), radio = fv("radio"),
         }
+        if item.access_mode ~= "wired" then
+            item.access_mode = "wifi"
+        end
+        if item.access_mode == "wired" then
+            item.ssid = ""
+            item.bssid = ""
+            item.radio = ""
+        end
         if item.label == "" then
             local op = item.operator or ""
             if item.user_id ~= "" and op ~= "" and op ~= "xn" then

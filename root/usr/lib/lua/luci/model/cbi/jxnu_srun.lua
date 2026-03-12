@@ -387,8 +387,11 @@ function overview_status.cfgvalue()
         applyTone(level);
         title.textContent = status + pending;
         var metaHtml = '<span>WiFi: ' + ssid + '</span><span>模式: ' + mode + '</span><span>连通性: ' + conn + '</span><span>接口/IP: ' + iface + ' / ' + ip + '</span>';
-        metaHtml += '<span>账号: ' + campusLabel + '</span>';
-        if (mode === '热点模式') { metaHtml += '<span>热点: ' + hotspotLabel + '</span>'; }
+        if (mode === '热点模式') {
+          metaHtml += '<span>热点: ' + hotspotLabel + '</span>';
+        } else {
+          metaHtml += '<span>账号: ' + campusLabel + '</span>';
+        }
         meta.innerHTML = metaHtml;
       } catch (e) {
         applyTone('offline');
@@ -448,18 +451,32 @@ function manual_login.cfgvalue()
     xhr.send(null);
   }
 
+  window.jxnuFetchJson = fetchJson;
+
   function openBlockingFeedback(action, requestedAt) {
     var logBox = E('pre', {
       'style': 'max-height:18rem;overflow:auto;margin:0;padding:.75rem;border:1px solid rgba(127,127,127,.28);background:rgba(127,127,127,.08);white-space:pre-wrap;word-break:break-word;'
     }, '等待后端反馈...');
-    var tip = E('p', { 'style': 'margin:.5rem 0 1rem 0;' }, action === 'manual_login' ? '正在执行登录流程，请勿关闭页面。' : '正在执行登出流程，请稍候。');
+    var titles = {
+      manual_login: '正在登录',
+      manual_logout: '正在登出',
+      switch_hotspot: '正在切到热点',
+      switch_campus: '正在切回校园网'
+    };
+    var tips = {
+      manual_login: '正在执行登录流程，请勿关闭页面。',
+      manual_logout: '正在执行登出流程，请稍候。',
+      switch_hotspot: '正在切换到热点网络，请稍候。',
+      switch_campus: '正在切换回校园网，请稍候。'
+    };
+    var tip = E('p', { 'style': 'margin:.5rem 0 1rem 0;' }, tips[action] || '正在执行网络动作，请稍候。');
     var footer = E('div', { 'class': 'right' });
     var closed = false;
     var timer = null;
     var forceShown = false;
 
     function showForceStopButton() {
-      if (closed || forceShown || action !== 'manual_login') return;
+      if (closed || forceShown) return;
       forceShown = true;
       footer.appendChild(E('button', {
         'class': 'btn cbi-button cbi-button-remove',
@@ -497,6 +514,7 @@ function manual_login.cfgvalue()
         'click': function() { L.hideModal(); }
       }, '关闭返回'));
       if (text) result.textContent = text + (success ? ' 🎉' : ' ⚠');
+      window.setTimeout(function() { window.location.reload(); }, 1200);
     }
 
     function checkTerminal(statusData) {
@@ -529,6 +547,20 @@ function manual_login.cfgvalue()
         }
       }
 
+      if (action === 'switch_hotspot') {
+        if (statusData.action_result === 'ok') {
+          unlock(statusData.status || '已切到热点', true);
+          return true;
+        }
+      }
+
+      if (action === 'switch_campus') {
+        if (statusData.action_result === 'ok') {
+          unlock(statusData.status || '已切回校园网', true);
+          return true;
+        }
+      }
+
       return false;
     }
 
@@ -550,10 +582,12 @@ function manual_login.cfgvalue()
       });
     }
 
-    L.showModal(action === 'manual_login' ? '正在登录' : '正在登出', [ tip, logBox, footer ], 'cbi-modal');
+    L.showModal(titles[action] || '正在执行动作', [ tip, logBox, footer ], 'cbi-modal');
     timer = window.setInterval(poll, 1000);
     poll();
   }
+
+  window.jxnuOpenBlockingFeedback = openBlockingFeedback;
 
   function submit(action) {
     result.textContent = '正在提交...';
@@ -635,9 +669,10 @@ function switch_test.cfgvalue()
     return [[
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
   <button id="jxnu-srun-switch-hotspot" type="button" class="cbi-button cbi-button-apply">切到热点</button>
-  <button id="jxnu-srun-switch-campus" type="button" class="cbi-button">切回校园网</button>
-  <span id="jxnu-srun-switch-result" style="color:#666;">点击后会异步执行</span>
+  <button id="jxnu-srun-switch-campus" type="button" class="cbi-button cbi-button-apply">切回校园网</button>
+  <span id="jxnu-srun-switch-result" style="color:#666;"></span>
 </div>
+<div class="cbi-value-description">手动切网会停用自动登录服务，如需启用请再次手动开启。</div>
 <script type="text/javascript">
 (function() {
   var hotspot = document.getElementById('jxnu-srun-switch-hotspot');
@@ -664,7 +699,11 @@ function switch_test.cfgvalue()
       }
       try {
         var data = JSON.parse(xhr.responseText || '{}');
-        result.textContent = (typeof data.message === 'string' && data.message !== '') ? data.message : '已提交';
+        var message = (typeof data.message === 'string' && data.message !== '') ? data.message : '已提交';
+        result.textContent = message;
+        if (data.ok && typeof window.jxnuOpenBlockingFeedback === 'function') {
+          window.jxnuOpenBlockingFeedback(action, parseInt(data.requested_at || 0, 10) || 0);
+        }
       } catch (e) {
         result.textContent = '提交失败';
       }
@@ -693,6 +732,9 @@ function tables_html.cfgvalue()
     local current_mode = tostring(state.current_mode or "")
     local online_account_label = tostring(state.online_account_label or "")
     local current_ssid = tostring(state.current_ssid or "")
+    local current_bssid = tostring(state.current_bssid or "")
+    local current_iface = tostring(state.current_iface or "")
+    local current_campus_access_mode = tostring(state.current_campus_access_mode or "")
 
     local operator_labels = { cmcc = "移动", ctcc = "电信", cucc = "联通", xn = "校内网" }
     local radio_labels = { [""] = "自动" }
@@ -709,9 +751,28 @@ function tables_html.cfgvalue()
         for _, a in ipairs(campus) do
             local aid = tostring(a.id or "")
             local campus_user = tostring(a.user_id or "")
+            local campus_ssid = tostring(a.ssid or "")
+            local campus_bssid = tostring(a.bssid or ""):lower()
+            local access_mode = tostring(a.access_mode or "wifi")
+            local ssid_display = access_mode == "wired" and "有线" or tostring(a.ssid or "jxnu_stu")
             local is_active = (aid == active_cid)
             local is_default = (aid == default_cid)
-            local is_connected = current_mode == "campus" and campus_user ~= "" and online_account_label == campus_user
+            local wifi_match = current_mode == "campus"
+                and current_campus_access_mode == "wifi"
+                and campus_ssid ~= ""
+                and current_ssid == campus_ssid
+                and ((campus_bssid == "") or (current_bssid == campus_bssid))
+            local wired_match = current_mode == "campus"
+                and current_campus_access_mode == "wired"
+                and access_mode == "wired"
+                and current_iface == "wan"
+            local identity_match = campus_user ~= "" and online_account_label == campus_user
+            local is_connected = false
+            if access_mode == "wired" then
+                is_connected = wired_match and identity_match
+            else
+                is_connected = wifi_match and identity_match
+            end
             local badge_parts = {}
             if is_connected then
                 badge_parts[#badge_parts + 1] = '<span style="display:inline-block;color:#16a34a;font-weight:700;">已连接</span>'
@@ -733,7 +794,7 @@ function tables_html.cfgvalue()
                 .. '<td class="td">' .. util.pcdata(tostring(a.ac_id or "1")) .. '</td>'
                 .. '<td class="td">' .. util.pcdata(tostring(a.user_id or "")) .. '</td>'
                 .. '<td class="td">' .. (operator_labels[tostring(a.operator or "")] or tostring(a.operator or "")) .. '</td>'
-                .. '<td class="td">' .. util.pcdata(tostring(a.ssid or "jxnu_stu")) .. '</td>'
+                .. '<td class="td">' .. util.pcdata(ssid_display) .. '</td>'
                 .. '<td class="td">' .. util.pcdata(tostring(a.bssid or "")) .. '</td>'
                 .. '<td class="td">' .. util.pcdata(radio_labels[tostring(a.radio or "")] or tostring(a.radio or "自动")) .. '</td>'
                 .. '<td class="td cbi-section-actions"><div class="jxnu-action-cell">'
@@ -808,7 +869,6 @@ function tables_html.cfgvalue()
 
 <div class="cbi-section cbi-tblsection jxnu-native-box">
   <h3>校园网账号</h3>
-  <div style="margin:0 0 .75rem 0;color:#4b5563;line-height:1.6;">“已连接”表示当前实际联网账号；“默认”表示下次优先使用的账号；若两者不同，会显示“待生效”。</div>
   <table class="table cbi-section-table">
     <tr class="tr table-titles"><th class="th" style="width:80px;">状态</th><th class="th">标签</th><th class="th">认证地址</th><th class="th">ACID</th><th class="th">学工号</th><th class="th">运营商</th><th class="th">SSID</th><th class="th">BSSID</th><th class="th">频段</th><th class="th cbi-section-actions" style="width:120px;">操作</th></tr>
     <tbody>]] .. campus_rows .. [[</tbody>
@@ -820,7 +880,6 @@ function tables_html.cfgvalue()
 
 <div class="cbi-section cbi-tblsection jxnu-native-box">
   <h3>热点配置</h3>
-  <div style="margin:0 0 .75rem 0;color:#4b5563;line-height:1.6;">“已连接”表示当前实际连接热点；“默认”表示下次优先使用的热点；若两者不同，会显示“待生效”。</div>
   <table class="table cbi-section-table">
     <tr class="tr table-titles"><th class="th" style="width:80px;">状态</th><th class="th">标签</th><th class="th">SSID</th><th class="th">加密方式</th><th class="th">频段</th><th class="th cbi-section-actions" style="width:120px;">操作</th></tr>
     <tbody>]] .. hotspot_rows .. [[</tbody>
@@ -860,6 +919,23 @@ function renderPasswordField(containerId, fieldId, value) {
 function getFieldValue(id) {
   var node = document.getElementById('widget.' + id) || document.getElementById(id);
   return node ? node.value : '';
+}
+
+function setRowDisabled(rowId, inputId, disabled) {
+  var row = document.getElementById(rowId);
+  var input = document.getElementById(inputId);
+  if (!row || !input) return;
+  input.disabled = !!disabled;
+  row.style.opacity = disabled ? '0.55' : '1';
+}
+
+function updateCampusAccessModeUI() {
+  var mode = document.getElementById('jm-access_mode');
+  if (!mode) return;
+  var wired = mode.value === 'wired';
+  setRowDisabled('jm-ssid-row', 'jm-ssid', wired);
+  setRowDisabled('jm-bssid-row', 'jm-bssid', wired);
+  setRowDisabled('jm-radio-row', 'jm-radio', wired);
 }
 
 function showNativeModal(title, bodyHtml, afterOpen, onSave) {
@@ -941,17 +1017,20 @@ window.jxnuEditCampus = function(id) {
     '<div class="jxnu-native-row"><label>标签（选填）</label><input id="jm-label" value="' + (item.label || '') + '"></div>' +
     '<div class="jxnu-native-row"><label>学工号</label><input id="jm-user_id" value="' + (item.user_id || '') + '"></div>' +
     '<div class="jxnu-native-row"><label>运营商</label><select id="jm-operator"><option value="cmcc"' + (item.operator==='cmcc'?' selected':'') + '>中国移动</option><option value="ctcc"' + (item.operator==='ctcc'?' selected':'') + '>中国电信</option><option value="cucc"' + (item.operator==='cucc'?' selected':'') + '>中国联通</option><option value="xn"' + (item.operator==='xn'?' selected':'') + '>校内网</option></select></div>' +
+    '<div class="jxnu-native-row"><label>接入方式</label><select id="jm-access_mode"><option value="wifi"' + (((item.access_mode || 'wifi')==='wifi')?' selected':'') + '>无线</option><option value="wired"' + ((item.access_mode==='wired')?' selected':'') + '>有线（WAN）</option></select></div>' +
     '<div class="jxnu-native-row"><label>密码</label><div id="jm-password-field"></div></div>' +
     '<div class="jxnu-native-row"><label>认证地址</label><input id="jm-base_url" value="' + (item.base_url || 'http://172.17.1.2') + '"></div>' +
     '<div class="jxnu-native-row"><label>AC_ID</label><input id="jm-ac_id" value="' + (item.ac_id || '1') + '"></div>' +
-    '<div class="jxnu-native-row"><label>校园网 SSID</label><input id="jm-ssid" value="' + (item.ssid || 'jxnu_stu') + '"></div>' +
-    '<div class="jxnu-native-row"><label>BSSID（选填）</label><input id="jm-bssid" value="' + (item.bssid || '') + '"></div>' +
-    '<div class="jxnu-native-row"><label>频段</label><select id="jm-radio">]] .. radio_options .. [[</select></div>';
+    '<div class="jxnu-native-row" id="jm-ssid-row"><label>校园网 SSID</label><input id="jm-ssid" value="' + (item.ssid || 'jxnu_stu') + '"></div>' +
+    '<div class="jxnu-native-row" id="jm-bssid-row"><label>BSSID（留空则不锁定）</label><input id="jm-bssid" value="' + (item.bssid || '') + '"></div>' +
+    '<div class="jxnu-native-row" id="jm-radio-row"><label>频段</label><select id="jm-radio">]] .. radio_options .. [[</select></div>';
   showNativeModal(
     id ? '编辑校园网账号' : '新增校园网账号',
     bodyHtml,
     function() {
       document.getElementById('jm-radio').value = item.radio || '';
+      document.getElementById('jm-access_mode').addEventListener('change', updateCampusAccessModeUI);
+      updateCampusAccessModeUI();
       renderPasswordField('jm-password-field', 'jm-password', item.password || '');
     },
     function() { jxnuModalSave(); }
@@ -972,6 +1051,7 @@ window.jxnuEditHotspot = function(id) {
     id ? '编辑热点配置' : '新增热点配置',
     bodyHtml,
     function() {
+      document.getElementById('jm-encryption').value = item.encryption || 'psk2';
       document.getElementById('jm-radio').value = item.radio || '';
       renderPasswordField('jm-key-field', 'jm-key', item.key || '');
     },
@@ -988,6 +1068,7 @@ window.jxnuModalSave = function() {
     fd.append('label', document.getElementById('jm-label').value);
     fd.append('user_id', document.getElementById('jm-user_id').value);
     fd.append('operator', document.getElementById('jm-operator').value);
+    fd.append('access_mode', document.getElementById('jm-access_mode').value);
     fd.append('password', getFieldValue('jm-password'));
     fd.append('base_url', document.getElementById('jm-base_url').value);
     fd.append('ac_id', document.getElementById('jm-ac_id').value);
