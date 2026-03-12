@@ -40,7 +40,7 @@ local SCALAR_DEFAULTS = {
     hotspot_failback_enabled = "1",
     connectivity_check_mode = "internet",
     backoff_exponent_factor = "1.5", backoff_inter_const_factor = "0",
-    backoff_outer_const_factor = "0", interval = "180",
+    backoff_outer_const_factor = "0", interval = "60",
     developer_mode = "0", sta_iface = "",
     n = "200", ["type"] = "1", enc = "srun_bx1",
 }

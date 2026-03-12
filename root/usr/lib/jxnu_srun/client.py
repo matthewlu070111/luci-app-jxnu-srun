@@ -141,7 +141,7 @@ def _load_defaults():
         "backoff_exponent_factor": "1.5",
         "backoff_inter_const_factor": "0",
         "backoff_outer_const_factor": "0",
-        "interval": "180",
+        "interval": "60",
         "developer_mode": "0",
         "sta_iface": "",
         "n": "200",
