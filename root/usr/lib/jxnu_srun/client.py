@@ -990,6 +990,14 @@ def run_once_with_retry(cfg, ignore_service_disabled=False):
         failures += 1
 
 
+def run_once_manual(cfg):
+    ok, message = run_once_safe(cfg)
+    if ok:
+        return True, message
+    append_log("[JXNU-SRun] 手动登录阶段失败: %s" % message)
+    return False, message
+
+
 def quiet_connection_state(cfg, urls=None):
     runtime_mode = detect_runtime_mode(cfg)
     if runtime_mode == "hotspot":
@@ -2906,7 +2914,7 @@ def run_manual_login(cfg):
             "[JXNU-SRun] 正在执行手动登录：开始提交认证请求，目标账号=%s。"
             % get_logout_username(cfg)
         )
-        login_ok, login_msg = run_once_with_retry(cfg, ignore_service_disabled=True)
+        login_ok, login_msg = run_once_manual(cfg)
         if login_ok:
             append_log(
                 "[JXNU-SRun] 手动登录请求已成功：登录阶段返回结果=%s，开始校验目标接入配置与认证/连通性。"
