@@ -616,6 +616,38 @@ class ForceClosePluginSourceTests(unittest.TestCase):
         self.assertIn("/usr/lib/smart_srun/client.py", controller_source)
         self.assertNotIn("jxnu_srun", controller_source)
 
+
+class LuciSourceHardeningTests(unittest.TestCase):
+    def test_cbi_model_escapes_embedded_json_inside_script_blocks(self):
+        source = read_repo_text(
+            "root", "usr", "lib", "lua", "luci", "model", "cbi", "smart_srun.lua"
+        )
+
+        self.assertIn("local function safe_json_for_script(json_str)", source)
+        self.assertIn(
+            "var campusData = ]] .. safe_json_for_script(campus_json) .. [[;", source
+        )
+        self.assertIn(
+            "var hotspotData = ]] .. safe_json_for_script(hotspot_json) .. [[;", source
+        )
+
+    def test_luci_config_writes_use_temp_file_replace_flow(self):
+        controller_source = read_repo_text(
+            "root", "usr", "lib", "lua", "luci", "controller", "smart_srun.lua"
+        )
+        model_source = read_repo_text(
+            "root", "usr", "lib", "lua", "luci", "model", "cbi", "smart_srun.lua"
+        )
+
+        self.assertIn('local tmp = CONFIG_FILE .. ".tmp"', controller_source)
+        self.assertIn("os.rename(tmp, CONFIG_FILE)", controller_source)
+        self.assertIn('local tmp = CONFIG_FILE .. ".tmp"', model_source)
+        self.assertIn("os.rename(tmp, CONFIG_FILE)", model_source)
+        self.assertNotIn(
+            'fs.writefile(CONFIG_FILE, (jsonc.stringify(out) or "{}") .. "\\n")',
+            model_source,
+        )
+
     def test_hot_update_uploads_runtime_payload_dependency_closure(self):
         hot_update = load_hot_update_module(self)
 

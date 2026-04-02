@@ -188,7 +188,9 @@ local function load_config_json()
 end
 
 local function save_config_json(data)
-    fs.writefile(CONFIG_FILE, (jsonc.stringify(data) or "{}") .. "\n")
+    local tmp = CONFIG_FILE .. ".tmp"
+    fs.writefile(tmp, (jsonc.stringify(data) or "{}") .. "\n")
+    os.rename(tmp, CONFIG_FILE)
 end
 
 restore_manual_guarded_enabled = function(state)

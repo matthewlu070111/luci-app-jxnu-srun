@@ -69,6 +69,17 @@ local function ensure_json_file()
     end
 end
 
+local function write_config_json_atomic(data)
+    ensure_json_file()
+    local tmp = CONFIG_FILE .. ".tmp"
+    fs.writefile(tmp, (jsonc.stringify(data) or "{}") .. "\n")
+    os.rename(tmp, CONFIG_FILE)
+end
+
+local function safe_json_for_script(json_str)
+    return (json_str or "[]"):gsub("</", "<\\/")
+end
+
 local function is_legacy_config(parsed)
     if type(parsed.campus_accounts) == "table" then return false end
     for _, k in ipairs(LEGACY_CAMPUS_KEYS) do
@@ -130,8 +141,7 @@ local function load_cfg()
     if type(parsed) ~= "table" then parsed = {} end
     if is_legacy_config(parsed) then
         parsed = migrate_legacy_config(parsed)
-        local j = jsonc.stringify(parsed)
-        if j then fs.writefile(CONFIG_FILE, j .. "\n") end
+        write_config_json_atomic(parsed)
     end
     local cfg = {}
     for _, key in ipairs(GLOBAL_SCALAR_KEYS) do
@@ -159,8 +169,7 @@ local function save_cfg(cfg)
         out[key] = type(cfg[key]) == "table" and cfg[key] or {}
     end
     out.school_extra = type(cfg.school_extra) == "table" and cfg.school_extra or {}
-    ensure_json_file()
-    fs.writefile(CONFIG_FILE, (jsonc.stringify(out) or "{}") .. "\n")
+    write_config_json_atomic(out)
 end
 
 local function load_state()
@@ -1365,8 +1374,8 @@ function tables_html.cfgvalue()
 if (window.__smartTablesInit) return;
 window.__smartTablesInit = true;
 
-var campusData = ]] .. campus_json .. [[;
-var hotspotData = ]] .. hotspot_json .. [[;
+var campusData = ]] .. safe_json_for_script(campus_json) .. [[;
+var hotspotData = ]] .. safe_json_for_script(hotspot_json) .. [[;
 var modalType = '';
 var modalEditId = '';
 var modalSaveHandler = null;
