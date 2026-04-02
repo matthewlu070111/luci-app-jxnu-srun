@@ -77,7 +77,7 @@ local function write_config_json_atomic(data)
 end
 
 local function safe_json_for_script(json_str)
-    return (json_str or "[]"):gsub("</", "<\\/")
+    return (json_str or "[]"):gsub("<", "\\u003C")
 end
 
 local function is_legacy_config(parsed)

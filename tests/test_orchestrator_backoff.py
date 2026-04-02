@@ -105,6 +105,50 @@ class RetryInterruptionTests(unittest.TestCase):
         self.assertGreaterEqual(len(sleep_calls), 1)
         self.assertTrue(all(call <= 2.0 for call in sleep_calls), sleep_calls)
 
+    def test_retry_wait_rechecks_action_after_short_final_sleep_chunk(self):
+        runtime_cfg = dict(self.cfg)
+        pending_payloads = iter(
+            [{}, {"action": "manual_login"}, {"action": "manual_login"}]
+        )
+        sleep_calls = []
+
+        def fake_load_json_file(_path):
+            return dict(next(pending_payloads))
+
+        def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        with (
+            mock.patch.object(
+                orchestrator.srun_auth,
+                "run_once_safe",
+                side_effect=[(False, "login failed"), (True, "should not run")],
+            ) as run_once,
+            mock.patch.object(orchestrator, "load_config", return_value=runtime_cfg),
+            mock.patch.object(orchestrator, "backoff_enabled", return_value=True),
+            mock.patch.object(orchestrator, "in_quiet_window", return_value=False),
+            mock.patch.object(
+                orchestrator, "calc_backoff_delay_seconds", return_value=1
+            ),
+            mock.patch.object(
+                orchestrator,
+                "load_json_file",
+                create=True,
+                side_effect=fake_load_json_file,
+            ),
+            mock.patch.object(
+                orchestrator, "ACTION_FILE", "/tmp/action.json", create=True
+            ),
+            mock.patch.object(orchestrator, "log"),
+            mock.patch.object(orchestrator.time, "sleep", side_effect=fake_sleep),
+        ):
+            ok, message = orchestrator.run_once_with_retry(dict(self.cfg))
+
+        self.assertFalse(ok)
+        self.assertIn("待处理操作", message)
+        self.assertEqual(run_once.call_count, 1)
+        self.assertEqual(sleep_calls, [1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,7 +97,7 @@ def _interruptible_sleep(total_seconds):
         chunk = min(remaining, 2.0)
         time.sleep(chunk)
         remaining -= chunk
-        if remaining > 0 and _pending_runtime_action():
+        if _pending_runtime_action():
             return False
     return True
 

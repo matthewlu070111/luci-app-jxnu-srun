@@ -684,6 +684,7 @@ class LuciSourceHardeningTests(unittest.TestCase):
         )
 
         self.assertIn("local function safe_json_for_script(json_str)", source)
+        self.assertIn('gsub("<", "\\\\u003C")', source)
         self.assertIn(
             "var campusData = ]] .. safe_json_for_script(campus_json) .. [[;", source
         )
