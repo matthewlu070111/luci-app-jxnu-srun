@@ -545,6 +545,9 @@ class DaemonStartupStateTests(unittest.TestCase):
             save_calls.append((message, dict(state or {}), dict(extra)))
 
         with (
+            mock.patch.object(
+                daemon, "_acquire_daemon_lock", return_value=object(), create=True
+            ),
             mock.patch.object(daemon, "reconcile_manual_login_service_guard"),
             mock.patch.object(daemon, "load_config", return_value=dict(cfg)),
             mock.patch.object(
