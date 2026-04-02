@@ -103,6 +103,9 @@
 srunnet
 srunnet status
 
+# 查看当前安装包类型与版本
+srunnet --version
+
 # 登录 / 登出 / 重新登录
 srunnet login
 srunnet logout
