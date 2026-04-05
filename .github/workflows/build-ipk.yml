@@ -188,9 +188,11 @@ jobs:
       - name: Render pre-release notes from template
         run: |
           VERSION='${{ github.event.inputs.version }}'
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
           OPENWRT_VERSION='${{ github.event.inputs.openwrt_version }}'
           if [ -z "$OPENWRT_VERSION" ]; then OPENWRT_VERSION='23.05.5'; fi
-          SPLIT_PACKAGES_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/downloads/${VERSION}/smart-srun-split-packages-${VERSION}.zip"
+          SPLIT_PACKAGES_URL="$(python scripts/release_assets.py build-split-url "$OWNER" "$REPO" "$VERSION")"
 
           sed \
             -e "s/\${VERSION}/${VERSION}/g" \

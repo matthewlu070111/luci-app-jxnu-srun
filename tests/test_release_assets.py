@@ -1,3 +1,4 @@
+import contextlib
 import importlib
 import io
 import sys
@@ -324,6 +325,33 @@ class ReleaseAssetsTests(unittest.TestCase):
                 "Compare main...v1.2.3 via https://example.invalid/download.zip",
             )
 
+    def test_main_rejects_invalid_replacement_argument(self):
+        release_assets = load_release_assets_module(self)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            template_path = temp_path / "release-template.md"
+            output_path = temp_path / "release-notes.md"
+
+            template_path.write_text("Version ${VERSION}", encoding="utf-8")
+
+            stderr = io.StringIO()
+            with (
+                self.assertRaises(SystemExit) as ctx,
+                contextlib.redirect_stderr(stderr),
+            ):
+                release_assets.main(
+                    [
+                        "render-notes",
+                        str(template_path),
+                        str(output_path),
+                        "INVALID_REPLACEMENT",
+                    ]
+                )
+
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertIn("expected KEY=VALUE format", stderr.getvalue())
+
     def test_main_prepares_release_outputs_and_prints_metadata(self):
         release_assets = load_release_assets_module(self)
 
@@ -344,9 +372,8 @@ class ReleaseAssetsTests(unittest.TestCase):
                 "luci", encoding="utf-8"
             )
 
-            stdout = sys.stdout
-            sys.stdout = io.StringIO()
-            try:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
                 exit_code = release_assets.main(
                     [
                         "prepare",
@@ -356,9 +383,7 @@ class ReleaseAssetsTests(unittest.TestCase):
                         "v1.2.3",
                     ]
                 )
-                output = sys.stdout.getvalue()
-            finally:
-                sys.stdout = stdout
+            output = stdout.getvalue()
 
             self.assertEqual(exit_code, 0)
             self.assertIn(
@@ -372,15 +397,12 @@ class ReleaseAssetsTests(unittest.TestCase):
     def test_main_prints_split_packages_url(self):
         release_assets = load_release_assets_module(self)
 
-        stdout = sys.stdout
-        sys.stdout = io.StringIO()
-        try:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
             exit_code = release_assets.main(
                 ["build-split-url", "example", "smart-srun", "v1.2.3"]
             )
-            output = sys.stdout.getvalue()
-        finally:
-            sys.stdout = stdout
+        output = stdout.getvalue()
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(

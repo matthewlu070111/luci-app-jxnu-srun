@@ -132,7 +132,13 @@ def main(argv=None):
         print(build_split_packages_url(args.owner, args.repo, args.version))
         return 0
 
-    replacements = dict(item.split("=", 1) for item in args.replacements)
+    replacements = {}
+    for item in args.replacements:
+        if "=" not in item:
+            parser.error("invalid replacement %r: expected KEY=VALUE format" % item)
+        key, value = item.split("=", 1)
+        replacements[key] = value
+
     write_release_notes(args.template_path, args.output_path, replacements)
     return 0
 
