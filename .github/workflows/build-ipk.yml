@@ -172,21 +172,10 @@ jobs:
           pattern: smart-srun-ipk*
           merge-multiple: true
 
-      - name: Prepare release asset directories
+      - name: Prepare release assets
         run: |
           VERSION='${{ github.event.inputs.version }}'
-          python scripts/release_assets.py prepare artifacts release-assets split-downloads "$VERSION" > release-assets-metadata.json
-          echo "SPLIT_ZIP_NAME=smart-srun-split-packages-${VERSION}.zip" >> "$GITHUB_ENV"
-          ls -lh release-assets/
-          ls -lh split-downloads/
-
-      - name: Compute split packages URL
-        run: |
-          OWNER="${GITHUB_REPOSITORY%/*}"
-          REPO="${GITHUB_REPOSITORY#*/}"
-          VERSION='${{ github.event.inputs.version }}'
-          SPLIT_PACKAGES_URL="$(python scripts/release_assets.py build-split-url "$OWNER" "$REPO" "$VERSION")"
-          echo "SPLIT_PACKAGES_URL=${SPLIT_PACKAGES_URL}" >> "$GITHUB_ENV"
+          python scripts/release_assets.py prepare artifacts release-assets split-downloads "$VERSION"
 
       - name: Render pre-release notes from template
         run: |
@@ -194,18 +183,19 @@ jobs:
           OPENWRT_VERSION='${{ github.event.inputs.openwrt_version }}'
           if [ -z "$OPENWRT_VERSION" ]; then OPENWRT_VERSION='23.05.5'; fi
           COMPARE_REF="main...${VERSION}"
+          SPLIT_PACKAGES_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/downloads/${VERSION}/smart-srun-split-packages-${VERSION}.zip"
 
-          python scripts/release_assets.py render-notes \
-            .github/prerelease-template.md \
-            prerelease-notes.md \
-            "VERSION=${VERSION}" \
-            "OPENWRT_VERSION=${OPENWRT_VERSION}" \
-            "COMPARE_REF=${COMPARE_REF}" \
-            "SPLIT_PACKAGES_URL=${SPLIT_PACKAGES_URL}"
+          sed \
+            -e "s/\${VERSION}/${VERSION}/g" \
+            -e "s/\${OPENWRT_VERSION}/${OPENWRT_VERSION}/g" \
+            -e "s/\${COMPARE_REF}/${COMPARE_REF}/g" \
+            -e "s|\${SPLIT_PACKAGES_URL}|${SPLIT_PACKAGES_URL}|g" \
+            .github/prerelease-template.md > prerelease-notes.md
 
       - name: Publish split packages to downloads branch
         run: |
           VERSION='${{ github.event.inputs.version }}'
+          SPLIT_ZIP_NAME="smart-srun-split-packages-${VERSION}.zip"
           WORKTREE_DIR="downloads-branch"
 
           rm -rf "$WORKTREE_DIR"
