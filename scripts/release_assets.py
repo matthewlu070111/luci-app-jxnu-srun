@@ -3,12 +3,23 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import sys
 import zipfile
 
 
+_SAFE_VERSION_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _validate_version(version):
+    if not version or version in (".", "..") or not _SAFE_VERSION_RE.match(version):
+        raise ValueError("unsafe version: %s" % version)
+    return version
+
+
 def _split_zip_name(version):
+    version = _validate_version(version)
     return "smart-srun-split-packages-%s.zip" % version
 
 
@@ -28,7 +39,11 @@ def prepare_release_outputs(artifacts_dir, release_dir, split_dir, version):
     for stale_split_zip_path in split_dir.glob("smart-srun-split-packages-*.zip"):
         stale_split_zip_path.unlink()
 
-    for bundle_path in sorted(artifacts_dir.glob("luci-app-smart-srun-bundle_*.ipk")):
+    bundle_paths = sorted(artifacts_dir.glob("luci-app-smart-srun-bundle_*.ipk"))
+    if not bundle_paths:
+        raise ValueError("Missing luci-app-smart-srun bundle package")
+
+    for bundle_path in bundle_paths:
         shutil.copy2(str(bundle_path), str(release_dir / bundle_path.name))
 
     core_package_paths = sorted(artifacts_dir.glob("smart-srun_*.ipk"))

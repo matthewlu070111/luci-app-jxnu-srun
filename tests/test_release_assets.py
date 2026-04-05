@@ -22,6 +22,28 @@ def load_release_assets_module(test_case):
 
 
 class ReleaseAssetsTests(unittest.TestCase):
+    def test_prepare_release_outputs_rejects_missing_bundle_package(self):
+        release_assets = load_release_assets_module(self)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            artifacts_dir = temp_path / "artifacts"
+            release_dir = temp_path / "release"
+            split_dir = temp_path / "split"
+            artifacts_dir.mkdir()
+
+            (artifacts_dir / "smart-srun_1.2.3_all.ipk").write_text(
+                "core", encoding="utf-8"
+            )
+            (artifacts_dir / "luci-app-smart-srun_1.2.3_all.ipk").write_text(
+                "luci", encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(ValueError, "bundle"):
+                release_assets.prepare_release_outputs(
+                    artifacts_dir, release_dir, split_dir, "v1.2.3"
+                )
+
     def test_prepare_release_outputs_rejects_missing_split_package(self):
         release_assets = load_release_assets_module(self)
 
@@ -158,6 +180,17 @@ class ReleaseAssetsTests(unittest.TestCase):
             release_assets.build_split_packages_url("example", "smart-srun", "v1.2.3"),
             "https://raw.githubusercontent.com/example/smart-srun/downloads/v1.2.3/smart-srun-split-packages-v1.2.3.zip",
         )
+
+    def test_build_split_packages_url_rejects_unsafe_version(self):
+        release_assets = load_release_assets_module(self)
+
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            release_assets.build_split_packages_url(
+                "example", "smart-srun", "../v1.2.3"
+            )
+
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            release_assets.build_split_packages_url("example", "smart-srun", "..")
 
     def test_render_release_notes_template_replaces_placeholders(self):
         release_assets = load_release_assets_module(self)
